@@ -149,9 +149,21 @@ class MutableReactiveHandler extends BaseReactiveHandler {
     if (!this._isShallow) {
       const isOldValueReadonly = isReadonly(oldValue)
       if (!isShallow(value) && !isReadonly(value)) {
+        //获取原始对象（解除 Proxy）避免重复嵌套 reactive
         oldValue = toRaw(oldValue)
         value = toRaw(value)
       }
+      /**
+       * 如果 target 不是数组，且 旧值是 ref，而新值不是 ref：
+       * 
+       * 赋值给 ref 的 value 而不是替换整个 ref,保证对 ref 的响应式更新正常
+       * 
+       * 只读处理：
+       * 如果 ref 是只读的，直接报错（DEV 环境下）并返回 true
+       * 
+       * return true：
+       * 表示赋值已经处理完成，不需要执行后续逻辑
+       */
       if (!isArray(target) && isRef(oldValue) && !isRef(value)) {
         if (isOldValueReadonly) {
           if (__DEV__) {
@@ -170,6 +182,13 @@ class MutableReactiveHandler extends BaseReactiveHandler {
       // in shallow mode, objects are set as-is regardless of reactive or not
     }
 
+    /**
+     * 数组特殊处理：
+     * 数组索引赋值时，如果索引小于 length，说明是修改，否则是新增
+     * 
+     * 普通对象：
+     * hasOwn(target, key) 判断对象自身是否已有该属性
+     */
     const hadKey =
       isArray(target) && isIntegerKey(key)
         ? Number(key) < target.length
@@ -181,6 +200,8 @@ class MutableReactiveHandler extends BaseReactiveHandler {
       isRef(target) ? target : receiver,
     )
     // don't trigger if target is something up in the prototype chain of original
+    // 是否触发依赖收集：如果目标是原型链上某个原型的属性，不要触发
+    // 避免触发继承链上原型对象的 setter 时，误触发依赖
     if (target === toRaw(receiver)) {
       if (!hadKey) {
         trigger(target, TriggerOpTypes.ADD, key, value)
